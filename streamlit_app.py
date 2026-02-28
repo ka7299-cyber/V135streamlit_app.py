@@ -9,10 +9,10 @@ import requests
 import time
 
 # 頁面配置
-st.set_page_config(page_title="Sniper X V138 (Gapless)", layout="wide")
+st.set_page_config(page_title="Sniper X V139 (Fix)", layout="wide")
 
 # ==============================================
-# 1. 資料庫：美股大師策略
+# 1. 資料庫設定
 # ==============================================
 US_STRATEGIES = {
     'NVDA': (19, 58), 'MSFT': (21, 53), 'TSLA': (17, 58), 'GOOGL': (26, 55),
@@ -26,45 +26,41 @@ US_STRATEGIES = {
     'BKNG': (23, None), 'NVO': (26, 57), 'IBP': (20, None), 'PAYC': (20, None),
     'URI': (22, None), 'GIB': (21, None), 'CTAS': (19, None), 'CHE': (24, None)
 }
+US_NAMES = {'NVDA': '輝達', 'MSFT': '微軟', 'TSLA': '特斯拉', 'GOOGL': '谷歌', 'AMZN': '亞馬遜', 'META': '臉書', 'AAPL': '蘋果', 'TSM': '台積電ADR', 'AMD': '超微', 'ADBE': 'Adobe', 'ASML': '艾司摩爾', 'QCOM': '高通', 'NFLX': '奈飛', 'COST': '好市多', 'UNH': '聯合健康', 'NVO': '諾和諾德', 'AVGO': '博通'}
 
-US_NAMES = {
-    'NVDA': '輝達', 'MSFT': '微軟', 'TSLA': '特斯拉', 'GOOGL': '谷歌', 'AMZN': '亞馬遜',
-    'META': '臉書', 'AAPL': '蘋果', 'TSM': '台積電ADR', 'AMD': '超微', 'ADBE': 'Adobe',
-    'ASML': '艾司摩爾', 'QCOM': '高通', 'NFLX': '奈飛', 'COST': '好市多', 'UNH': '聯合健康',
-    'NVO': '諾和諾德', 'AVGO': '博通'
-}
-
-# ==============================================
-# 2. 資料庫：台股大師策略
-# ==============================================
-TW_STRATEGIES = {
-    '2330': (17, 57), '2317': (18, 57), '2382': (23, 60), '2357': (21, 57),
-    '2454': (29, 60), '2603': (35, 60), '3081': (20, 60), '3264': (18, 57)
-}
-
+TW_STRATEGIES = {'2330': (17, 57), '2317': (18, 57), '2382': (23, 60), '2357': (21, 57), '2454': (29, 60), '2603': (35, 60), '3081': (20, 60), '3264': (18, 57)}
 TW_NAMES = {'2330':'台積電', '2317':'鴻海', '2454':'聯發科', '3081':'聯亞', '2382':'廣達'}
 
 # ==============================================
-# 3. 核心 AI 演算法
+# 2. 核心 AI 演算法 & 強力連線
 # ==============================================
 
-@st.cache_data(ttl=1800)
-def fetch_data_stable(ticker_symbol):
-    session = requests.Session()
-    session.headers.update({"User-Agent": "Mozilla/5.0 Chrome/91.0.4472.124"})
-    for _ in range(3):
-        try:
-            t = yf.Ticker(ticker_symbol, session=session)
-            df = t.history(period="2y")
-            if not df.empty: return df
-            time.sleep(1)
-        except: time.sleep(1)
+@st.cache_data(ttl=600) # 縮短快取時間，避免卡死
+def fetch_data_robust(ticker_symbol):
+    # 策略 A: 直接連線 (不帶舊版身分證)
+    try:
+        df = yf.Ticker(ticker_symbol).history(period="2y")
+        if not df.empty: return df
+    except: pass
+    
+    # 策略 B: 偽裝成最新版 Chrome 瀏覽器
+    try:
+        session = requests.Session()
+        # 更新為 2024 年主流瀏覽器 User-Agent
+        session.headers.update({"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"})
+        df = yf.Ticker(ticker_symbol, session=session).history(period="2y")
+        if not df.empty: return df
+    except: pass
+    
     return pd.DataFrame()
 
 def find_best_ma_golden_bluff_v2(df, start_day, end_day):
     closes = df['Close'].values; lows = df['Low'].values; highs = df['High'].values
     n = len(df)
     best_ma = start_day; best_score = -np.inf
+    
+    # 建立費氏係數加分表 (金唬男邏輯)
+    fib_nums = {21, 34, 55, 89}
 
     for ma_len in range(start_day, end_day + 1):
         ma_series = df['Close'].rolling(window=ma_len).mean()
@@ -89,11 +85,14 @@ def find_best_ma_golden_bluff_v2(df, start_day, end_day):
             
         avg_error = (total_error / point_count) if point_count > 0 else 0.05
         
-        score = 100 - (avg_error * 3000) # 強化貼合權重
+        score = 100 - (avg_error * 3000)
 
         cross_mask = (closes[valid_idx] > ma_slice) ^ (np.roll(closes[valid_idx], 1) > np.roll(ma_slice, 1))
         crosses_per_month = np.sum(cross_mask[1:]) / (len(ma_slice) / 20.0)
         if crosses_per_month > 3.0: score -= 100
+        
+        # 費氏數列微加分
+        if ma_len in fib_nums: score += 10
             
         if score > best_score: best_score = score; best_ma = ma_len
     return best_ma
@@ -112,9 +111,9 @@ def backtest_stats(df, ma_days):
     return (wins / total * 100) if total > 0 else 0, total
 
 # ==============================================
-# 4. 介面與顯示
+# 3. 介面與顯示
 # ==============================================
-st.sidebar.header("🕹️ Sniper X V138")
+st.sidebar.header("🕹️ Sniper X V139")
 market_mode = st.sidebar.radio("市場", ["🇹🇼 台股", "🇺🇸 美股"], horizontal=True)
 
 if "🇹🇼" in market_mode:
@@ -141,15 +140,15 @@ k_days = st.sidebar.select_slider("顯示K棒", options=[30, 60, 120, 240], valu
 
 if stock_id:
     t_symbol = f"{stock_id}.TW" if "🇹🇼" in market_mode else stock_id
-    df = fetch_data_stable(t_symbol)
+    df = fetch_data_robust(t_symbol)
     if df.empty and "🇹🇼" in market_mode: 
         t_symbol = f"{stock_id}.TWO"
-        df = fetch_data_stable(t_symbol)
+        df = fetch_data_robust(t_symbol)
 
     if not df.empty:
         p_short, p_long = curr_strat.get(stock_id, (None, None))
         
-        with st.spinner('🎯 正在鎖定最佳參數...'):
+        with st.spinner('🎯 正在運算...'):
             final_s = p_short if p_short else find_best_ma_golden_bluff_v2(df, 16, 25)
             final_l = p_long if p_long else find_best_ma_golden_bluff_v2(df, 45, 70)
         
@@ -163,9 +162,8 @@ if stock_id:
         df['ML'] = df['Close'].rolling(window=final_l).mean()
         df['V5'] = df['Volume'].rolling(window=5).mean()
         
-        p_df = df.tail(k_days).copy() # 建立複本以避免警告
-        
-        # ★ 關鍵修正：將索引轉為字串，徹底移除假日空隙
+        p_df = df.tail(k_days).copy()
+        # 無縫K線設定
         p_df.index = p_df.index.strftime('%Y-%m-%d')
         
         last_c = p_df['Close'].iloc[-1]
@@ -181,7 +179,6 @@ if stock_id:
         trend = "🔥 強勢多頭" if last_c > p_df['MS'].iloc[-1] > p_df['ML'].iloc[-1] else "📈 區間偏多" if last_c > p_df['MS'].iloc[-1] else "❄️ 絕對空頭"
         c4.metric("戰情判定", trend)
 
-        # 繪圖
         fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.02, row_width=[0.3, 0.7])
         fig.add_trace(go.Candlestick(x=p_df.index, open=p_df['Open'], high=p_df['High'], low=p_df['Low'], close=p_df['Close'], name='K棒', increasing_line_color='#ef5350', decreasing_line_color='#26a69a'), row=1, col=1)
         fig.add_trace(go.Scatter(x=p_df.index, y=p_df['MS'], name='短線', line=dict(color='#ff9800', width=2)), row=1, col=1)
@@ -191,14 +188,10 @@ if stock_id:
         fig.add_trace(go.Bar(x=p_df.index, y=p_df['Volume'], marker_color=v_cols, name='量'), row=2, col=1)
         fig.add_trace(go.Scatter(x=p_df.index, y=p_df['V5'], line=dict(color='#29b6f6', width=1), name='5MA量'), row=2, col=1)
 
-        # ★ 關鍵設定：type='category' 讓 K 棒無縫排列
         fig.update_layout(height=400, template="plotly_white", xaxis_rangeslider_visible=False, showlegend=False, margin=dict(l=0,r=10,t=5,b=0), hovermode="x unified", dragmode=False)
-        fig.update_xaxes(
-            fixedrange=True, 
-            type='category',   # 移除空隙的關鍵
-            nticks=6           # 避免日期擠在一起，限制顯示數量
-        )
+        fig.update_xaxes(fixedrange=True, type='category', nticks=6)
         fig.update_yaxes(side="right", fixedrange=True)
         st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
     else:
-        st.error(f"連線異常，請稍後重試 {stock_id}")
+        # 提供更友善的除錯訊息
+        st.error(f"⚠️ 連線受阻。請嘗試點擊右下角 'Manage app' > 'Clear cache' 後重試。")
